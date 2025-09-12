@@ -3,9 +3,13 @@
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
 cliVersion: 4.8.0
-domain: apiplustech.com
 layout:
 - go.kubebuilder.io/v4
 projectName: publish-routing-controller
 repo: github.com/nut-api/publish-routing-controller.git
+resources:
+- controller: true
+  group: networking.istio.io
+  kind: VirtualService
+  version: v1
 version: "3"
