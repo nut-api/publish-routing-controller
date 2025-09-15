@@ -69,7 +69,7 @@ func (r *VirtualServiceReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		labels = map[string]string{}
 	}
 
-	l.Info("VirtualService labels", "labels", labels)
+	// l.Info("VirtualService labels", "labels", labels)
 
 	// Check if the label "webrenderer-version" exists
 	if _, ok := labels["webrenderer-version"]; !ok {
@@ -125,8 +125,6 @@ func (r *VirtualServiceReconciler) addConfigmapsIfNotExists(ctx context.Context,
 	} else if err != nil {
 		l.Error(err, "Failed to get ConfigMap", "name", name)
 		return configMap, err
-	} else {
-		l.Info("ConfigMap already exists", "name", name)
 	}
 	return configMap, nil
 }
@@ -146,7 +144,7 @@ func (r *VirtualServiceReconciler) checkVersionInConfigMap(ctx context.Context, 
 	if versions, ok := c.Data["webrenderer-versions"]; ok {
 		// Split the versions by comma and check if the version exists
 		if slices.Contains(strings.Split(versions, ","), version) {
-			l.Info("Version found in ConfigMap", "version", version)
+			// l.Info("Version found in ConfigMap", "version", version)
 			return nil
 		}
 	}
