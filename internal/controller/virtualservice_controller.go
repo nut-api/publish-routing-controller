@@ -18,9 +18,12 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/deployment"
 	networkingv1 "istio.io/client-go/pkg/apis/networking/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -62,6 +65,7 @@ func (r *VirtualServiceReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		// handle the error here
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	fmt.Println("Reconciling VirtualService:", virtualservice.Name)
 
 	// Get virtualservice labels
 	labels := virtualservice.GetLabels()
@@ -76,6 +80,7 @@ func (r *VirtualServiceReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		l.Info("VirtualService does not have 'webrenderer-version' label, skipping", "namespace", virtualservice.Namespace, "name", virtualservice.Name)
 		return ctrl.Result{}, nil
 	}
+	version := labels["webrenderer-version"]
 
 	l.Info("Reconciling VirtualService", "namespace", virtualservice.Namespace, "name", virtualservice.Name)
 
@@ -90,6 +95,25 @@ func (r *VirtualServiceReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	err = r.checkVersionInConfigMap(ctx, virtualservice, configMap)
 	if err != nil {
 		l.Error(err, "Failed to check version in ConfigMap")
+		return ctrl.Result{}, err
+	}
+
+	// Check webrenderer is ready
+	webrenderer := (&deployment.WebrendererDeployment{}).NewWebrenderer(r.Client, version)
+	if ready, err := webrenderer.IsReady(ctx); err != nil {
+		l.Error(err, "Failed to check webrenderer deployment status", "version", version)
+		return ctrl.Result{}, err
+	} else if !ready {
+		// If not ready, requeue after 1 minute
+		l.Info("Webrenderer deployment is not ready", "version", version)
+		// Requeue after 1 minute to check again
+		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+	}
+
+	// Edit virtualservice destination to use the correct webrenderer service
+	err = r.editVirtualServiceDestination(ctx, virtualservice)
+	if err != nil {
+		l.Error(err, "Failed to edit VirtualService destination")
 		return ctrl.Result{}, err
 	}
 
@@ -164,6 +188,48 @@ func (r *VirtualServiceReconciler) checkVersionInConfigMap(ctx context.Context, 
 		return err
 	}
 
+	return nil
+}
+
+// Function to edit virtualservice destination to use the correct webrenderer service
+func (r *VirtualServiceReconciler) editVirtualServiceDestination(ctx context.Context, v *networkingv1.VirtualService) error {
+	l := logf.FromContext(ctx)
+
+	// Get the version from the virtualservice labels
+	version := v.Labels["webrenderer-version"]
+	if version == "" {
+		l.Info("VirtualService does not have 'webrenderer-version' label")
+		return nil
+	}
+
+	// Deepcopy the old virtualservice for comparison
+	oldVirtualservice := v.DeepCopy()
+
+	// Edit the virtualservice destination to use the correct webrenderer service
+	if len(v.Spec.Http) > 0 && len(v.Spec.Http[0].Route) > 0 {
+		for i := range v.Spec.Http[0].Route {
+			if v.Spec.Http[0].Route[i].Destination != nil {
+				v.Spec.Http[0].Route[i].Destination.Host = "webrenderer-" + version + ".default.svc.cluster.local"
+			}
+		}
+	}
+
+	// If old and new virtualservice are the same, do nothing
+	if oldVirtualservice.Spec.String() == v.Spec.String() {
+		l.Info("VirtualService destination already set correctly", "name", v.Name)
+		return nil
+	}
+	// Log the change
+	l.Info("Updating VirtualService destination")
+
+	// Add currently use version to label
+
+	v.Labels["current-webrenderer-version"] = version
+
+	// Update the virtualservice
+	if err := r.Update(ctx, v); err != nil {
+		l.Error(err, "Failed to update VirtualService", "name", v.Name)
+	}
 	return nil
 }
 

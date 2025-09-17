@@ -21,6 +21,15 @@ type WebrendererDeployment struct {
 	WebrendererVersion string
 }
 
+func (d *WebrendererDeployment) NewWebrenderer(client client.Client, version string) webrenderer.Webrenderer {
+	return &WebrendererDeployment{
+		Client:             client,
+		DeploymentName:     "webrenderer-" + version,
+		ServiceName:        "webrenderer-" + version,
+		WebrendererVersion: version,
+	}
+}
+
 func (d *WebrendererDeployment) GetAndCreateIfNotExists(ctx context.Context) error {
 	l := logf.FromContext(ctx)
 	deployment := &appsv1.Deployment{}
@@ -148,6 +157,24 @@ func (d *WebrendererDeployment) DeleteWebrenderer(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (d *WebrendererDeployment) IsReady(ctx context.Context) (bool, error) {
+	deployment := &appsv1.Deployment{}
+	err := d.Client.Get(ctx, client.ObjectKey{
+		Name:      d.DeploymentName,
+		Namespace: "default",
+	}, deployment)
+	if err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return false, err
+		}
+		return false, nil // Not found means not ready
+	}
+	if deployment.Status.ReadyReplicas > 0 {
+		return true, nil
+	}
+	return false, nil
 }
 
 func int32Ptr(i int32) *int32 { return &i }

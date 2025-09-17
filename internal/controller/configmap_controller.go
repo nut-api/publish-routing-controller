@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/deployment"
 	networkingv1 "istio.io/client-go/pkg/apis/networking/v1"
@@ -71,6 +72,12 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	// Example: Log the ConfigMap data
 	l.Info("ConfigMap data", "data", configMap.Data)
 
+	// Return if no webrenderer-versions value in ConfigMap
+	if _, ok := configMap.Data["webrenderer-versions"]; !ok {
+		l.Info("No webrenderer-versions key in ConfigMap, nothing to do")
+		return ctrl.Result{}, nil
+	}
+
 	versions := strings.SplitSeq(configMap.Data["webrenderer-versions"], ",")
 	if versions == nil {
 		return ctrl.Result{}, nil
@@ -78,22 +85,22 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	updateVersions := []string{}
 	for version := range versions {
 
-		webrenderer := deployment.WebrendererDeployment{
-			Client:             r.Client,
-			DeploymentName:     "webrenderer-" + version,
-			ServiceName:        "webrenderer-" + version,
-			WebrendererVersion: version,
-		}
+		webrenderer := (&deployment.WebrendererDeployment{}).NewWebrenderer(r.Client, version)
 		// Check any VirtualService is using this version by label "webrenderer-version"
-		virtualservices := &networkingv1.VirtualServiceList{}
-		err = r.List(ctx, virtualservices, &client.ListOptions{
-			Namespace:     "default",
-			LabelSelector: labels.SelectorFromSet(labels.Set{"webrenderer-version": version}),
-		})
-		if err != nil {
-			return ctrl.Result{}, err
+		labels := []string{"webrenderer-version", "current-webrenderer-version"}
+		used := false
+		// Check all labels
+		for _, label := range labels {
+			l.Info("Check VirtualService using webrenderer version", "label", label, "version", version)
+			used, err = r.isWebrendererUsedByVirtualService(ctx, label, version)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+			if used {
+				break
+			}
 		}
-		if len(virtualservices.Items) == 0 {
+		if !used {
 			// No VirtualService is using this version, delete the webrenderer deployment and service
 			l.Info("No VirtualService is using this version, Delete webrendererDeployment", "version", version)
 			webrenderer.DeleteWebrenderer(ctx)
@@ -111,17 +118,40 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 	}
-	// Update the ConfigMap with the current versions in use
-	configMap.Data["webrenderer-versions"] = strings.Join(updateVersions, ",")
-	err = r.Update(ctx, configMap)
-	if err != nil {
-		return ctrl.Result{}, err
+
+	// Check verions changed, update the ConfigMap if needed
+	l.Info("ConfigMap webrenderer-versions", "old", configMap.Data["webrenderer-versions"], "new", strings.Join(updateVersions, ","))
+
+	// if strings.Join(versions, ",") != strings.Join(updateVersions, ",") {
+	if configMap.Data["webrenderer-versions"] != strings.Join(updateVersions, ",") {
+		l.Info("ConfigMap webrenderer-versions changed, updating", "old", configMap.Data["webrenderer-versions"], "new", strings.Join(updateVersions, ","))
+		// Update the ConfigMap with the current versions in use
+		configMap.Data["webrenderer-versions"] = strings.Join(updateVersions, ",")
+		err = r.Update(ctx, configMap)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		l.Info("Updated ConfigMap with current webrenderer versions", "versions", configMap.Data["webrenderer-versions"])
 	}
-	l.Info("Updated ConfigMap with current webrenderer versions", "versions", configMap.Data["webrenderer-versions"])
 
-	// Everything is fine, requeue after 10 minutes to ensure the deployment is up-to-date
+	// Everything is fine, requeue after 1 minutes to ensure the deployment is up-to-date
+	return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+}
 
-	return ctrl.Result{}, nil
+// Check webrenderer is used by virtualserice label
+func (r *ConfigMapReconciler) isWebrendererUsedByVirtualService(ctx context.Context, key string, value string) (bool, error) {
+	vss := &networkingv1.VirtualServiceList{}
+	err := r.List(ctx, vss, &client.ListOptions{
+		Namespace:     "default",
+		LabelSelector: labels.SelectorFromSet(labels.Set{key: value}),
+	})
+	if err != nil {
+		return false, err
+	}
+	if len(vss.Items) == 0 {
+		return false, nil
+	}
+	return true, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
