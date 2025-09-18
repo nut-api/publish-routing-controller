@@ -238,5 +238,6 @@ func (r *VirtualServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Uncomment the following line adding a pointer to an instance of the controlled resource as an argument
 		For(&networkingv1.VirtualService{}).
+		Named("virtualservice").
 		Complete(r)
 }

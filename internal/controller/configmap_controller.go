@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -56,11 +57,12 @@ type ConfigMapReconciler struct {
 func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	l := logf.FromContext(ctx)
 
+	fmt.Println("Reconciling ConfigMap:", req.NamespacedName)
+
 	// TODO(user): your logic here
 	configMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, req.NamespacedName, configMap)
 	if err != nil {
-		// handle the error here
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	// Check if the ConfigMap is "webrenderer-version-config"
@@ -92,7 +94,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Check all labels
 		for _, label := range labels {
 			l.Info("Check VirtualService using webrenderer version", "label", label, "version", version)
-			used, err = r.isWebrendererUsedByVirtualService(ctx, label, version)
+			used, err = r.isWebrendererUsedByLabel(ctx, label, version)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
@@ -139,7 +141,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // Check webrenderer is used by virtualserice label
-func (r *ConfigMapReconciler) isWebrendererUsedByVirtualService(ctx context.Context, key string, value string) (bool, error) {
+func (r *ConfigMapReconciler) isWebrendererUsedByLabel(ctx context.Context, key string, value string) (bool, error) {
 	vss := &networkingv1.VirtualServiceList{}
 	err := r.List(ctx, vss, &client.ListOptions{
 		Namespace:     "default",
