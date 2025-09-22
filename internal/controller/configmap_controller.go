@@ -111,6 +111,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 			continue
 		}
+		l.Info("Found VirtualService is using this version, ensure webrendererDeployment exists", "version", version)
 		// Add used version to updateVersions list
 		updateVersions = append(updateVersions, version)
 
@@ -120,9 +121,6 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 	}
-
-	// Check verions changed, update the ConfigMap if needed
-	l.Info("ConfigMap webrenderer-versions", "old", configMap.Data["webrenderer-versions"], "new", strings.Join(updateVersions, ","))
 
 	// if strings.Join(versions, ",") != strings.Join(updateVersions, ",") {
 	if configMap.Data["webrenderer-versions"] != strings.Join(updateVersions, ",") {
@@ -134,10 +132,12 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			return ctrl.Result{}, err
 		}
 		l.Info("Updated ConfigMap with current webrenderer versions", "versions", configMap.Data["webrenderer-versions"])
+	} else {
+		l.Info("ConfigMap webrenderer-versions is up-to-date", "versions", configMap.Data["webrenderer-versions"])
 	}
 
-	// Everything is fine, requeue after 1 minutes to ensure the deployment is up-to-date
-	return ctrl.Result{RequeueAfter: 1 * time.Minute}, nil
+	// Everything is fine, requeue after 10 minutes to ensure the deployment is up-to-date
+	return ctrl.Result{RequeueAfter: 10 * time.Minute}, nil
 }
 
 // Check webrenderer is used by virtualserice label
@@ -146,14 +146,12 @@ func (r *ConfigMapReconciler) isWebrendererUsedByLabel(ctx context.Context, key 
 	err := r.List(ctx, vss, &client.ListOptions{
 		Namespace:     "default",
 		LabelSelector: labels.SelectorFromSet(labels.Set{key: value}),
+		Limit:         1,
 	})
 	if err != nil {
 		return false, err
 	}
-	if len(vss.Items) == 0 {
-		return false, nil
-	}
-	return true, nil
+	return len(vss.Items) != 0, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
