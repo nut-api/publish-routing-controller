@@ -22,7 +22,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/deployment"
+	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/github"
 	networkingv1 "istio.io/client-go/pkg/apis/networking/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,7 +36,8 @@ import (
 // ConfigMapReconciler reconciles a ConfigMap object
 type ConfigMapReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme       *runtime.Scheme
+	GithubClient github.GithubClient
 }
 
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
@@ -84,10 +85,18 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	if versions == nil {
 		return ctrl.Result{}, nil
 	}
+
+	//PreReconcile for github webrenderer to pull latest repo
+	err = r.PreReconcile(ctx)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	updateVersions := []string{}
 	for version := range versions {
 
-		webrenderer := (&deployment.WebrendererDeployment{}).NewWebrenderer(r.Client, version)
+		webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(version)
+
 		// Check any VirtualService is using this version by label "webrenderer-version"
 		labels := []string{"webrenderer-version", "current-webrenderer-version"}
 		used := false
@@ -103,23 +112,29 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			}
 		}
 		if !used {
-			// No VirtualService is using this version, delete the webrenderer deployment and service
-			l.Info("No VirtualService is using this version, Delete webrendererDeployment", "version", version)
+			// No VirtualService is using this version, delete the webrenderer
+			l.Info("No VirtualService is using this version, Delete webrenderer", "version", version)
 			webrenderer.DeleteWebrenderer(ctx)
 			if err != nil {
 				return ctrl.Result{}, err
 			}
 			continue
 		}
-		l.Info("Found VirtualService is using this version, ensure webrendererDeployment exists", "version", version)
+		l.Info("Found VirtualService is using this version, ensure webrenderer exists", "version", version)
 		// Add used version to updateVersions list
 		updateVersions = append(updateVersions, version)
 
-		// Ensure the webrenderer deployment and service exist
+		// Ensure the webrenderer exist
 		err = webrenderer.GetAndCreateIfNotExists(ctx)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+	}
+
+	// PostReconcile for github webrenderer to commit and push changes if any
+	err = r.PostReconcile(ctx)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 
 	// if strings.Join(versions, ",") != strings.Join(updateVersions, ",") {
@@ -154,6 +169,17 @@ func (r *ConfigMapReconciler) isWebrendererUsedByLabel(ctx context.Context, key 
 	return len(vss.Items) != 0, nil
 }
 
+// PreReconcile clones or pulls the GitHub repo to ensure we have the latest version
+func (r *ConfigMapReconciler) PreReconcile(ctx context.Context) error {
+	return github.CloneOrPullRepo(ctx, r.GithubClient)
+}
+
+// Commit and push if changed
+func (r *ConfigMapReconciler) PostReconcile(ctx context.Context) error {
+	commitMsg := "Update webrenderer ArgoCD app " + time.Now().Format(time.RFC3339)
+	return github.CommitAndPushChanges(ctx, r.GithubClient, commitMsg)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
@@ -164,6 +190,6 @@ func (r *ConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				Namespace: "default",
 			},
 		}).
-		Named("configmap").
+		Named("webrenderer-version-configmap").
 		Complete(r)
 }

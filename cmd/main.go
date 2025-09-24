@@ -38,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	"github.com/nut-api/publish-routing-controller.git/internal/controller"
+	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/github"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -193,6 +194,10 @@ func main() {
 	if err := (&controller.ConfigMapReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		GithubClient: github.GithubClient{
+			RepoURL:     "https://github.com/nut-api/publish-routing-controlled.git",
+			GithubToken: "",
+		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConfigMap")
 		os.Exit(1)

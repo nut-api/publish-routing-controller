@@ -99,15 +99,15 @@ func (r *VirtualServiceReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Check webrenderer is ready
-	webrenderer := (&deployment.WebrendererDeployment{}).NewWebrenderer(r.Client, version)
+	webrenderer := (&deployment.WebrendererDeployment{Client: r.Client}).NewWebrenderer(version)
 	if ready, err := webrenderer.IsReady(ctx); err != nil {
 		l.Error(err, "Failed to check webrenderer deployment status", "version", version)
 		return ctrl.Result{}, err
 	} else if !ready {
 		// If not ready, requeue after 1 minute
 		l.Info("Webrenderer deployment is not ready", "version", version)
-		// Requeue after 1 minute to check again
-		return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+		// Requeue after 10 second to check again
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	// Edit virtualservice destination to use the correct webrenderer service
