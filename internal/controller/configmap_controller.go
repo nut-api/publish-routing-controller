@@ -95,7 +95,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	updateVersions := []string{}
 	for version := range versions {
 
-		webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(version)
+		webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, version)
 
 		// Check any VirtualService is using this version by label "webrenderer-version"
 		labels := []string{"webrenderer-version", "current-webrenderer-version"}
@@ -127,6 +127,8 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		// Ensure the webrenderer exist
 		err = webrenderer.GetAndCreateIfNotExists(ctx)
 		if err != nil {
+			l.Error(err, "Failed to create or ensure webrenderer exists", "version", version)
+			webrenderer.DeleteWebrenderer(ctx)
 			return ctrl.Result{}, err
 		}
 	}

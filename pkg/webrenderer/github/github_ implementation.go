@@ -28,9 +28,9 @@ func CloneOrPullRepo(ctx context.Context, githubClient GithubClient) error {
 	}
 
 	// Check if ./repo exists, if not clone, if yes pull
-	if _, err := os.Stat("argo-app"); os.IsNotExist(err) {
+	if _, err := os.Stat("app-repo"); os.IsNotExist(err) {
 		l.Info("Cloning GitHub repo")
-		_, err := git.PlainClone("argo-app", &git.CloneOptions{
+		_, err := git.PlainClone("app-repo", &git.CloneOptions{
 			URL:      githubClient.RepoURL,
 			Auth:     auth,
 			Tags:     git.NoTags,
@@ -42,7 +42,7 @@ func CloneOrPullRepo(ctx context.Context, githubClient GithubClient) error {
 	} else {
 		l.Info("Repo exists, pulling latest changes")
 	}
-	repo, err := git.PlainOpen("argo-app")
+	repo, err := git.PlainOpen("app-repo")
 	if err != nil {
 		return fmt.Errorf("failed to open git repo")
 	}
@@ -54,7 +54,8 @@ func CloneOrPullRepo(ctx context.Context, githubClient GithubClient) error {
 
 	// Pull the latest changes from the origin remote and merge into the current branch
 	err = w.Pull(&git.PullOptions{RemoteName: "origin",
-		Auth: auth,
+		Auth:  auth,
+		Force: true,
 	})
 	if err != nil {
 		if err == git.NoErrAlreadyUpToDate {
@@ -70,7 +71,7 @@ func CloneOrPullRepo(ctx context.Context, githubClient GithubClient) error {
 func CommitAndPushChanges(ctx context.Context, githubClient GithubClient, commitMsg string) error {
 	// Change change on repo
 	l := logf.FromContext(ctx)
-	repo, err := git.PlainOpen("argo-app")
+	repo, err := git.PlainOpen("app-repo")
 	if err != nil {
 		return fmt.Errorf("failed to open git repo")
 	}

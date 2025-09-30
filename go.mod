@@ -4,6 +4,7 @@ go 1.24.6
 
 require (
 	github.com/go-git/go-git/v6 v6.0.0-20250922134601-9bda2a038490
+	github.com/goccy/go-yaml v1.18.0
 	github.com/onsi/ginkgo/v2 v2.22.0
 	github.com/onsi/gomega v1.36.1
 	istio.io/client-go v1.26.0-alpha.0.0.20250908201345-99e026bfe54f

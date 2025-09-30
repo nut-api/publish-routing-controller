@@ -21,7 +21,7 @@ type WebrendererDeployment struct {
 	WebrendererVersion string
 }
 
-func (d *WebrendererDeployment) NewWebrenderer(version string) webrenderer.Webrenderer {
+func (d *WebrendererDeployment) NewWebrenderer(ctx context.Context, version string) webrenderer.Webrenderer {
 	return &WebrendererDeployment{
 		Client:             d.Client,
 		DeploymentName:     "webrenderer-" + version,

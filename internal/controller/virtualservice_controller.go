@@ -99,7 +99,7 @@ func (r *VirtualServiceReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// Check webrenderer is ready
-	webrenderer := (&deployment.WebrendererDeployment{Client: r.Client}).NewWebrenderer(version)
+	webrenderer := (&deployment.WebrendererDeployment{Client: r.Client}).NewWebrenderer(ctx, version)
 	if ready, err := webrenderer.IsReady(ctx); err != nil {
 		l.Error(err, "Failed to check webrenderer deployment status", "version", version)
 		return ctrl.Result{}, err
