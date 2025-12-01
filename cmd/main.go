@@ -18,13 +18,17 @@ package main
 
 import (
 	"crypto/tls"
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/peterbourgon/ff/v4"
+	"github.com/peterbourgon/ff/v4/ffhelp"
 	networkingv1 "istio.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -85,6 +89,28 @@ func main() {
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
+
+	// Parse flags with ff
+	fs := ff.NewFlagSet("global")
+	var (
+		namespace   = fs.String('n', "namespace", "default", "namespace to watch (repeatable)")
+		githubRepo  = fs.StringLong("github-repo", "", "GitHub repository URL for webrenderer manifests")
+		githubToken = fs.StringLong("github-token", "", "GitHub token for accessing private repositories")
+	)
+
+	err := ff.Parse(fs, os.Args[1:],
+		ff.WithEnvVarPrefix("MANAGER"),  // try `env MANAGER_NAMESPACE=33ms basicflags`
+		ff.WithConfigFileFlag("config"), // try providing a file with `delta 33ms`
+		ff.WithConfigFileParser(ff.PlainParser),
+	)
+	switch {
+	case errors.Is(err, ff.ErrHelp):
+		fmt.Fprintf(os.Stderr, "%s\n", ffhelp.Flags(fs))
+		os.Exit(0)
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
@@ -159,7 +185,7 @@ func main() {
 		Scheme: scheme,
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
-				"default": {},
+				*namespace: {},
 			},
 		},
 		Metrics:                metricsServerOptions,
@@ -195,8 +221,8 @@ func main() {
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		GithubClient: github.GithubClient{
-			RepoURL:     "https://github.com/nut-api/publish-routing-controlled.git",
-			GithubToken: "",
+			RepoURL:     *githubRepo,
+			GithubToken: *githubToken,
 		},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConfigMap")

@@ -114,8 +114,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if !used {
 			// No VirtualService is using this version, delete the webrenderer
 			l.Info("No VirtualService is using this version, Delete webrenderer", "version", version)
-			webrenderer.DeleteWebrenderer(ctx)
-			if err != nil {
+			if webrenderer.DeleteWebrenderer(ctx) != nil {
 				return ctrl.Result{}, err
 			}
 			continue
@@ -128,7 +127,12 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		err = webrenderer.GetAndCreateIfNotExists(ctx)
 		if err != nil {
 			l.Error(err, "Failed to create or ensure webrenderer exists", "version", version)
-			webrenderer.DeleteWebrenderer(ctx)
+			// webrenderer.DeleteWebrenderer(ctx)
+			return ctrl.Result{}, err
+		}
+
+		if webrenderer.UpdateWebrenderer(ctx) != nil {
+			l.Error(err, "Failed to update webrenderer", "version", version)
 			return ctrl.Result{}, err
 		}
 	}

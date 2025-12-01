@@ -159,6 +159,11 @@ func (d *WebrendererDeployment) DeleteWebrenderer(ctx context.Context) error {
 	return nil
 }
 
+func (d *WebrendererDeployment) UpdateWebrenderer(ctx context.Context) error {
+	// TODO: Implement update logic if needed
+	return nil
+}
+
 func (d *WebrendererDeployment) IsReady(ctx context.Context) (bool, error) {
 	deployment := &appsv1.Deployment{}
 	err := d.Client.Get(ctx, client.ObjectKey{

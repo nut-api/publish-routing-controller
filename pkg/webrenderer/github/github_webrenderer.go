@@ -52,6 +52,13 @@ func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) error {
 		return err
 	}
 
+	// Check CurrentConfig have data
+	if g.CurrentConfig.Data == nil {
+		l.Info("Current ConfigMap has no data, cannot create webrenderer")
+		err := os.NewSyscallError("ConfigMap Data not found", nil)
+		return err
+	}
+
 	// Get the ArgoCD app YAML from the template
 	appYaml, err := GetArgoCDAppYAML(g.WebrendererVersion, g.CurrentConfig.Data["chartVersion"])
 	if err != nil {
@@ -99,6 +106,11 @@ func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) error {
 func (g *WebrendererGithub) DeleteWebrenderer(context.Context) error {
 	//Remove the directory
 	return os.RemoveAll(g.WebrendererPath)
+}
+
+func (g *WebrendererGithub) UpdateWebrenderer(ctx context.Context) error {
+	// TODO: Implement update logic if needed
+	return nil
 }
 
 func (g *WebrendererGithub) IsReady(ctx context.Context) (bool, error) {
