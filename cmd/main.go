@@ -224,6 +224,7 @@ func main() {
 			RepoURL:     *githubRepo,
 			GithubToken: *githubToken,
 		},
+		Namespace: *namespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ConfigMap")
 		os.Exit(1)
