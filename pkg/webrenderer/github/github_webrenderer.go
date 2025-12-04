@@ -2,9 +2,11 @@ package github
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 
+	argoappv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/goccy/go-yaml"
 	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer"
 	corev1 "k8s.io/api/core/v1"
@@ -19,22 +21,14 @@ type WebrendererGithub struct {
 	GithubClient       GithubClient
 	WebrendererVersion string
 	WebrendererPath    string
-	CurrentConfig      corev1.ConfigMap
 }
 
 func (g *WebrendererGithub) NewWebrenderer(ctx context.Context, version string) webrenderer.Webrenderer {
-	l := logf.FromContext(ctx)
-	currentConfig := &corev1.ConfigMap{}
-	err := g.Client.Get(ctx, client.ObjectKey{Name: "webrenderer-info", Namespace: "default"}, currentConfig)
-	if err != nil {
-		l.Error(err, "Failed to get current ConfigMap")
-	}
 	return &WebrendererGithub{
 		Client:             g.Client,
 		GithubClient:       g.GithubClient,
 		WebrendererVersion: version,
 		WebrendererPath:    "app-repo/webrenderer-" + version,
-		CurrentConfig:      *currentConfig,
 	}
 }
 
@@ -52,24 +46,30 @@ func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) error {
 		return err
 	}
 
+	currentConfig := &corev1.ConfigMap{}
+	err := g.Client.Get(ctx, client.ObjectKey{Name: "webrenderer-info", Namespace: "default"}, currentConfig)
+	if err != nil {
+		l.Error(err, "Failed to get current ConfigMap")
+	}
+
 	// Check CurrentConfig have data
-	if g.CurrentConfig.Data == nil {
+	if currentConfig.Data == nil {
 		l.Info("Current ConfigMap has no data, cannot create webrenderer")
 		err := os.NewSyscallError("ConfigMap Data not found", nil)
 		return err
 	}
 
 	// Get the ArgoCD app YAML from the template
-	appYaml, err := GetArgoCDAppYAML(g.WebrendererVersion, g.CurrentConfig.Data["chartVersion"])
+	appYaml, err := GetArgoCDAppYAML(g.WebrendererVersion, currentConfig.Data["chartVersion"])
 	if err != nil {
 		return err
 	}
 	var valuesYaml map[string]interface{}
-	if yaml.Unmarshal([]byte(g.CurrentConfig.Data["values"]), &valuesYaml) != nil {
+	if yaml.Unmarshal([]byte(currentConfig.Data["values"]), &valuesYaml) != nil {
 		return err
 	}
 	var envYaml []interface{}
-	if yaml.Unmarshal([]byte(g.CurrentConfig.Data["env"]), &envYaml) != nil {
+	if yaml.Unmarshal([]byte(currentConfig.Data["env"]), &envYaml) != nil {
 		return err
 	}
 
@@ -114,27 +114,35 @@ func (g *WebrendererGithub) UpdateWebrenderer(ctx context.Context) error {
 }
 
 func (g *WebrendererGithub) IsReady(ctx context.Context) (bool, error) {
-	// app := &argocdapp.Application{}
-	// err := g.Client.Get(ctx, client.ObjectKey{Name: "webrenderer-" + g.WebrendererVersion, Namespace: "argocd"}, app)
-	// if err != nil {
+	app := &argoappv1.Application{}
+	err := g.Client.Get(ctx, client.ObjectKey{
+		Name:      "webrenderer-" + g.WebrendererVersion,
+		Namespace: "argocd",
+	}, app)
+	if err != nil {
+		// Application not found
+		if client.IgnoreNotFound(err) != nil {
+			return false, err
+		}
+		fmt.Println("Webrenderer verion ", g.WebrendererVersion, " not found")
+		return false, nil
+	}
+	if app.Status.Sync.Status != "Synced" || app.Status.Health.Status != "Healthy" {
+		return false, nil
+	}
+	return true, nil
+
+	// // check if the app.yaml file exists
+	// appPath := g.WebrendererPath + "/app.yaml"
+	// if _, err := os.Stat(appPath); err == nil {
+	// 	// File exists
+	// 	return true, nil
+	// } else if !os.IsNotExist(err) {
+	// 	// Other error
 	// 	return false, err
 	// }
-	// if app.Status.Sync.Status != "Synced" || app.Status.Health.Status != "Healthy" {
-	// 	return false, nil
-	// }
-	// return true, nil
-
-	// check if the app.yaml file exists
-	appPath := g.WebrendererPath + "/app.yaml"
-	if _, err := os.Stat(appPath); err == nil {
-		// File exists
-		return true, nil
-	} else if !os.IsNotExist(err) {
-		// Other error
-		return false, err
-	}
-	// File does not exist
-	return false, nil
+	// // File does not exist
+	// return false, nil
 }
 
 func GetArgoCDAppYAML(version string, chartVersion string) (string, error) {

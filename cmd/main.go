@@ -29,7 +29,6 @@ import (
 
 	"github.com/peterbourgon/ff/v4"
 	"github.com/peterbourgon/ff/v4/ffhelp"
-	networkingv1 "istio.io/client-go/pkg/apis/networking/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -41,6 +40,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	argoappv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
 	"github.com/nut-api/publish-routing-controller.git/internal/controller"
 	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/github"
 	// +kubebuilder:scaffold:imports
@@ -53,7 +53,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(networkingv1.AddToScheme(scheme))
+	utilruntime.Must(argoappv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -186,6 +186,7 @@ func main() {
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
 				*namespace: {},
+				"argocd":   {}, // Watch ArgoCD applications in argocd namespace
 			},
 		},
 		Metrics:                metricsServerOptions,
@@ -210,13 +211,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.VirtualServiceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VirtualService")
-		os.Exit(1)
-	}
 	if err := (&controller.ConfigMapReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),

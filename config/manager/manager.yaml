@@ -61,9 +61,16 @@ spec:
       - command:
         - /manager
         imagePullPolicy: IfNotPresent
-        args:
-        - --leader-elect
-        - --health-probe-bind-address=:8081
+        # args:
+        # - --leader-elect
+        # - --health-probe-bind-address=:8081
+        env:
+        - name: MANAGER_NAMESPACE
+          value: "default"
+        - name: MANAGER_GITHUB_REPO
+          value: "https://github.com/nut-api/publish-routing-controlled.git"
+        - name: MANAGER_GITHUB_TOKEN
+          value: ""
         image: controller:latest
         name: manager
         ports: []

@@ -31,10 +31,10 @@ func CloneOrPullRepo(ctx context.Context, githubClient GithubClient) error {
 	if _, err := os.Stat("app-repo"); os.IsNotExist(err) {
 		l.Info("Cloning GitHub repo")
 		_, err := git.PlainClone("app-repo", &git.CloneOptions{
-			URL:      githubClient.RepoURL,
-			Auth:     auth,
-			Tags:     git.NoTags,
-			Progress: os.Stdout,
+			URL:  githubClient.RepoURL,
+			Auth: auth,
+			Tags: git.NoTags,
+			// Progress: os.Stdout,
 		})
 		if err != nil {
 			return err
