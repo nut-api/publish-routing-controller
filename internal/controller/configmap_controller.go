@@ -26,11 +26,13 @@ import (
 	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/github"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // ConfigMapReconciler reconciles a ConfigMap object
@@ -266,12 +268,24 @@ func (r *ConfigMapReconciler) PostReconcile(ctx context.Context) error {
 func (r *ConfigMapReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		// Watch only webrenderer-version-config ConfigMap
-		For(&corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "webrenderer-manager-config",
-				Namespace: r.Namespace,
-			},
-		}).
-		// Named("webrenderer-manager-configmap").
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				// Check if the configmap resource name and namespace match
+				if obj.GetName() != "webrenderer-manager-config" || obj.GetNamespace() != r.Namespace {
+					// If not, don't trigger reconciliation
+					return []reconcile.Request{}
+				}
+				return []reconcile.Request{
+					{
+						NamespacedName: types.NamespacedName{
+							Name:      obj.GetName(),
+							Namespace: obj.GetNamespace(),
+						},
+					},
+				}
+			}),
+		).
+		Named("Webrenderer-manager-configmap").
 		Complete(r)
 }
