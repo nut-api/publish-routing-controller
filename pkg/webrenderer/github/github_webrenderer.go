@@ -17,18 +17,20 @@ import (
 var _ webrenderer.Webrenderer = (*WebrendererGithub)(nil)
 
 type WebrendererGithub struct {
-	Client             client.Client
-	GithubClient       GithubClient
-	WebrendererVersion string
-	WebrendererPath    string
+	Client               client.Client
+	GithubClient         GithubClient
+	WebrendererVersion   string
+	WebrendererPath      string
+	WebrendererNamespace string
 }
 
-func (g *WebrendererGithub) NewWebrenderer(ctx context.Context, version string) webrenderer.Webrenderer {
+func (g *WebrendererGithub) NewWebrenderer(ctx context.Context, version string, namespace string) webrenderer.Webrenderer {
 	return &WebrendererGithub{
-		Client:             g.Client,
-		GithubClient:       g.GithubClient,
-		WebrendererVersion: version,
-		WebrendererPath:    "app-repo/webrenderer-" + version,
+		Client:               g.Client,
+		GithubClient:         g.GithubClient,
+		WebrendererVersion:   version,
+		WebrendererPath:      "app-repo/webrenderer-" + version,
+		WebrendererNamespace: namespace,
 	}
 }
 
@@ -47,7 +49,7 @@ func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) error {
 	}
 
 	currentConfig := &corev1.ConfigMap{}
-	err := g.Client.Get(ctx, client.ObjectKey{Name: "webrenderer-info", Namespace: "default"}, currentConfig)
+	err := g.Client.Get(ctx, client.ObjectKey{Name: "webrenderer-info", Namespace: g.WebrendererNamespace}, currentConfig)
 	if err != nil {
 		l.Error(err, "Failed to get current ConfigMap")
 	}
@@ -60,7 +62,7 @@ func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) error {
 	}
 
 	// Get the ArgoCD app YAML from the template
-	appYaml, err := GetArgoCDAppYAML(g.WebrendererVersion, currentConfig.Data["chartVersion"])
+	appYaml, err := GetArgoCDAppYAML(g.WebrendererVersion, currentConfig.Data["chartVersion"], g.GithubClient.RepoURL, g.WebrendererNamespace)
 	if err != nil {
 		return err
 	}
@@ -131,21 +133,9 @@ func (g *WebrendererGithub) IsReady(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	return true, nil
-
-	// // check if the app.yaml file exists
-	// appPath := g.WebrendererPath + "/app.yaml"
-	// if _, err := os.Stat(appPath); err == nil {
-	// 	// File exists
-	// 	return true, nil
-	// } else if !os.IsNotExist(err) {
-	// 	// Other error
-	// 	return false, err
-	// }
-	// // File does not exist
-	// return false, nil
 }
 
-func GetArgoCDAppYAML(version string, chartVersion string) (string, error) {
+func GetArgoCDAppYAML(version string, chartVersion string, repoUrl string, namespace string) (string, error) {
 	// Get from file on template/app.yaml
 	data, err := os.ReadFile("app-repo/template/app.yaml")
 	if err != nil {
@@ -155,5 +145,7 @@ func GetArgoCDAppYAML(version string, chartVersion string) (string, error) {
 	appYaml := string(data)
 	appYaml = strings.ReplaceAll(appYaml, "CHART_VERSION", chartVersion)
 	appYaml = strings.ReplaceAll(appYaml, "VERSION", version)
+	appYaml = strings.ReplaceAll(appYaml, "REPO_URL", repoUrl)
+	appYaml = strings.ReplaceAll(appYaml, "NAMESPACE", namespace)
 	return appYaml, nil
 }

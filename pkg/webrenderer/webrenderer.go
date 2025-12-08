@@ -5,7 +5,7 @@ import (
 )
 
 type Webrenderer interface {
-	NewWebrenderer(ctx context.Context, version string) Webrenderer
+	NewWebrenderer(ctx context.Context, version string, namespace string) Webrenderer
 	GetAndCreateIfNotExists(context.Context) error
 	DeleteWebrenderer(context.Context) error
 	UpdateWebrenderer(context.Context) error

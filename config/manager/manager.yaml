@@ -61,9 +61,9 @@ spec:
       - command:
         - /manager
         imagePullPolicy: IfNotPresent
-        # args:
-        # - --leader-elect
-        # - --health-probe-bind-address=:8081
+        args:
+        - --leader-elect
+        - --health-probe-bind-address=:8081
         env:
         - name: MANAGER_NAMESPACE
           value: "default"

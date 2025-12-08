@@ -136,7 +136,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			continue
 		}
 
-		webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, version)
+		webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, version, r.Namespace)
 
 		// Check if webrenderer is already being deployed (in pendingServingJson)
 		if !lo.Contains(pendingServingJson, versionInt) {
@@ -189,7 +189,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	for _, sw := range servingWebrenderersJson {
 		if !lo.Contains(versionIntJson, sw.Version) {
 			l.Info("Removing unneeded webrenderer", "version", sw.Version)
-			webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(sw.Version))
+			webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(sw.Version), r.Namespace)
 			err = webrenderer.DeleteWebrenderer(ctx)
 			if err != nil {
 				l.Error(err, "Failed to delete unneeded webrenderer", "version", sw.Version)
@@ -207,7 +207,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	for _, pv := range pendingServingJson {
 		if !lo.Contains(versionIntJson, pv) {
 			l.Info("Removing unneeded pending webrenderer", "version", pv)
-			webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(pv))
+			webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(pv), r.Namespace)
 			err = webrenderer.DeleteWebrenderer(ctx)
 			if err != nil {
 				l.Error(err, "Failed to delete unneeded pending webrenderer", "version", pv)
