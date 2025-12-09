@@ -127,8 +127,8 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	updateCheck := false
 	for _, version := range versionJson {
-		// print version
-		fmt.Println("This is version: ", version)
+
+		l.Info("Processing required webrenderer version", "version", version)
 		versionInt, _ := strconv.Atoi(version)
 
 		// Skip if already in servingWebrenderersJson
@@ -146,7 +146,6 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			err = webrenderer.GetAndCreateIfNotExists(ctx)
 			if err != nil {
 				l.Error(err, "Failed to create or ensure webrenderer exists", "version", version)
-				// webrenderer.DeleteWebrenderer(ctx)
 				return ctrl.Result{}, err
 			}
 			// Add to pendingServingJson
@@ -166,9 +165,7 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			l.Error(err, "Failed to check webrenderer status", "version", version)
 			return ctrl.Result{}, err
 		} else if !ready {
-			// If not ready, requeue after 1 minute
 			l.Info("Webrenderer is not ready", "version", version)
-			// return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 			continue
 		}
 
