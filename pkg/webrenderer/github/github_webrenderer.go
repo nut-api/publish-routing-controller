@@ -138,13 +138,25 @@ func GetWebrendererValues(currentConfig *corev1.ConfigMap, g *WebrendererGithub)
 	if yaml.Unmarshal([]byte(currentConfig.Data["env"]), &envYaml) != nil {
 		return nil, nil
 	}
+	var currentFullVersion string
+	if yaml.Unmarshal([]byte(currentConfig.Data["webrendererVersion"]), &currentFullVersion) != nil {
+		return nil, nil
+	}
 
 	// Configure webrenderer from current ConfigMap
+	// Set old values
 	webrendererValues := valuesYaml["webrenderer"].(map[string]interface{})
+
+	// replace values
 	webrendererValues["overrideEnv"] = envYaml
-	//change image.version to g.WebrendererVersion
-	webrendererValues["image"].(map[string]interface{})["version"] = g.WebrendererVersion
+
+	// If major version is different from currentConfig( deploy non current version), change currentFullVersion to g.WebrendererVersion
+	if g.WebrendererVersion != strings.Split(strings.TrimPrefix(currentFullVersion, "v"), ".")[0] {
+		currentFullVersion = g.WebrendererVersion
+	}
+	webrendererValues["image"].(map[string]interface{})["version"] = currentFullVersion
 	valuesYaml["webrenderer"] = webrendererValues
+	valuesYaml["nameOverride"] = "webrenderer-" + g.WebrendererVersion
 
 	// Spacial value for isolate webrenderer
 	valuesYaml["global"].(map[string]interface{})["isBaseChart"] = false
