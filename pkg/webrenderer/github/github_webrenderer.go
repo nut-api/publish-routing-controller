@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 
 	argoappv1 "github.com/argoproj/argo-cd/v3/pkg/apis/application/v1alpha1"
@@ -33,18 +34,23 @@ func (g *WebrendererGithub) NewWebrenderer(ctx context.Context, version string, 
 	}
 }
 
-func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) error {
+func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) (webrenderer.ServingWebrenderer, error) {
 	l := logf.FromContext(ctx)
 	// Check if ArgoCD app YAML exists in WebrendererPath
-	appPath := g.WebrendererPath + "/app.yaml"
-	valuesPath := g.WebrendererPath + "/values.yaml"
-	if _, err := os.Stat(appPath); err == nil {
-		l.Info("ArgoCD app YAML already exists", "path", appPath)
+	if _, err := os.Stat(g.WebrendererPath); err == nil {
+		l.Info("ArgoCD app YAML already exists", "path", g.WebrendererPath)
 		// File exists
-		return nil
+		return webrenderer.ServingWebrenderer{
+			Version: func() int {
+				v, _ := strconv.Atoi(g.WebrendererVersion)
+				return v
+			}(),
+			VersionFull: "",
+			Host:        "webrenderer-" + g.WebrendererVersion,
+		}, nil
 	} else if !os.IsNotExist(err) {
 		// Other error
-		return err
+		return webrenderer.ServingWebrenderer{}, err
 	}
 
 	currentConfig := &corev1.ConfigMap{}
@@ -57,32 +63,11 @@ func (g *WebrendererGithub) GetAndCreateIfNotExists(ctx context.Context) error {
 	if currentConfig.Data == nil {
 		l.Info("Current ConfigMap has no data, cannot create webrenderer")
 		err := os.NewSyscallError("ConfigMap Data not found", nil)
-		return err
+		return webrenderer.ServingWebrenderer{}, err
 	}
 
-	// Get the ArgoCD app YAML from the template
-	appYaml, err := GetArgoCDAppYAML(g.WebrendererVersion, currentConfig.Data["chartVersion"], g.GithubClient.RepoURL, g.WebrendererNamespace)
-	if err != nil {
-		return err
-	}
-	// Get the values.yaml content
-	valuesBytes, err := GetWebrendererValues(currentConfig, g)
-	if err != nil {
-		return err
-	}
+	return CreateWebrenderer(ctx, g, currentConfig)
 
-	// Ensure directory exists
-	if err := os.MkdirAll(g.WebrendererPath, 0755); err != nil {
-		return err
-	}
-	l.Info("Creating ArgoCD app YAML", "path", appPath)
-	// Write the YAML file
-	if os.WriteFile(appPath, []byte(appYaml), 0644) != nil {
-		return err
-	}
-	l.Info("Creating values YAML", "path", valuesPath)
-	// Write the values.yaml file
-	return os.WriteFile(valuesPath, valuesBytes, 0644)
 }
 
 func (g *WebrendererGithub) DeleteWebrenderer(context.Context) error {
@@ -90,8 +75,11 @@ func (g *WebrendererGithub) DeleteWebrenderer(context.Context) error {
 	return os.RemoveAll(g.WebrendererPath)
 }
 
-func (g *WebrendererGithub) UpdateWebrenderer(ctx context.Context) error {
-	// TODO: Implement update logic if needed
+func (g *WebrendererGithub) UpdateWebrenderer(ctx context.Context, currentConfig *corev1.ConfigMap) error {
+	g.DeleteWebrenderer(ctx)
+	if _, err := CreateWebrenderer(ctx, g, currentConfig); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -114,6 +102,43 @@ func (g *WebrendererGithub) IsReady(ctx context.Context) (bool, error) {
 	return true, nil
 }
 
+func CreateWebrenderer(ctx context.Context, g *WebrendererGithub, currentConfig *corev1.ConfigMap) (webrenderer.ServingWebrenderer, error) {
+	l := logf.FromContext(ctx)
+	appPath := g.WebrendererPath + "/app.yaml"
+	valuesPath := g.WebrendererPath + "/values.yaml"
+
+	// Get the ArgoCD app YAML from the template
+	appYaml, err := GetArgoCDAppYAML(g.WebrendererVersion, currentConfig.Data["chartVersion"], g.GithubClient.RepoURL, g.WebrendererNamespace)
+	if err != nil {
+		return webrenderer.ServingWebrenderer{}, err
+	}
+	// Get the values.yaml content
+	valuesBytes, err := GetWebrendererValues(currentConfig, g)
+	if err != nil {
+		return webrenderer.ServingWebrenderer{}, err
+	}
+
+	// Ensure directory exists
+	if err := os.MkdirAll(g.WebrendererPath, 0755); err != nil {
+		return webrenderer.ServingWebrenderer{}, err
+	}
+	l.Info("Creating ArgoCD app YAML", "path", appPath)
+	// Write the YAML file
+	if os.WriteFile(appPath, []byte(appYaml), 0644) != nil {
+		return webrenderer.ServingWebrenderer{}, err
+	}
+	l.Info("Creating values YAML", "path", valuesPath)
+	// Write the values.yaml file
+	return webrenderer.ServingWebrenderer{
+		Version: func() int {
+			v, _ := strconv.Atoi(g.WebrendererVersion)
+			return v
+		}(),
+		VersionFull: currentConfig.Data["webrendererVersion"],
+		Host:        "webrenderer-" + g.WebrendererVersion,
+	}, os.WriteFile(valuesPath, valuesBytes, 0644)
+}
+
 func GetArgoCDAppYAML(version string, chartVersion string, repoUrl string, namespace string) ([]byte, error) {
 	// Get from file on template/app.yaml
 	data, err := os.ReadFile("app-repo/template/app.yaml")
@@ -131,16 +156,16 @@ func GetArgoCDAppYAML(version string, chartVersion string, repoUrl string, names
 
 func GetWebrendererValues(currentConfig *corev1.ConfigMap, g *WebrendererGithub) ([]byte, error) {
 	var valuesYaml map[string]interface{}
-	if yaml.Unmarshal([]byte(currentConfig.Data["values"]), &valuesYaml) != nil {
-		return nil, nil
+	if err := yaml.Unmarshal([]byte(currentConfig.Data["values"]), &valuesYaml); err != nil {
+		return nil, err
 	}
 	var envYaml []interface{}
-	if yaml.Unmarshal([]byte(currentConfig.Data["env"]), &envYaml) != nil {
-		return nil, nil
+	if err := yaml.Unmarshal([]byte(currentConfig.Data["env"]), &envYaml); err != nil {
+		return nil, err
 	}
 	var currentFullVersion string
-	if yaml.Unmarshal([]byte(currentConfig.Data["webrendererVersion"]), &currentFullVersion) != nil {
-		return nil, nil
+	if err := yaml.Unmarshal([]byte(currentConfig.Data["webrendererVersion"]), &currentFullVersion); err != nil {
+		return nil, err
 	}
 
 	// Configure webrenderer from current ConfigMap
@@ -150,12 +175,13 @@ func GetWebrendererValues(currentConfig *corev1.ConfigMap, g *WebrendererGithub)
 	// replace values
 	webrendererValues["overrideEnv"] = envYaml
 
-	// If major version is different from currentConfig( deploy non current version), change currentFullVersion to g.WebrendererVersion
+	// If major version is different from currentConfig(deploy non current version), change currentFullVersion to g.WebrendererVersion
 	if g.WebrendererVersion != strings.Split(strings.TrimPrefix(currentFullVersion, "v"), ".")[0] {
 		currentFullVersion = g.WebrendererVersion
 	}
 	webrendererValues["image"].(map[string]interface{})["version"] = currentFullVersion
 	valuesYaml["webrenderer"] = webrendererValues
+
 	valuesYaml["nameOverride"] = "webrenderer-" + g.WebrendererVersion
 
 	// Spacial value for isolate webrenderer

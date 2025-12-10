@@ -21,8 +21,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer"
 	"github.com/nut-api/publish-routing-controller.git/pkg/webrenderer/github"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -43,10 +45,8 @@ type ConfigMapReconciler struct {
 	Namespace    string
 }
 
-type ServingWebrenderer struct {
-	Version int    `json:"version"`
-	Host    string `json:"host"`
-}
+// In-memory serving webrenderers list
+var servingWebrenderersJson []webrenderer.ServingWebrenderer
 
 // +kubebuilder:rbac:groups=core,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=core,resources=configmaps/status,verbs=get;update;patch
@@ -68,12 +68,52 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	fmt.Println("Reconciling ConfigMap:", req.NamespacedName)
 
-	// Check if the ConfigMap is "webrenderer-version-config"
-	if req.Name != "webrenderer-manager-config" || req.Namespace != r.Namespace {
-		// Not the ConfigMap we are interested in, ignore it
+	// Print old servingWebrenderersJson
+	l.Info("Current servingWebrenderersJson", "servingWebrenderers", servingWebrenderersJson)
+
+	// Check if the ConfigMap is "webrenderer-info"
+	if req.Name == "webrenderer-info" {
+		fmt.Println("Processing webrenderer-info ConfigMap")
+		configMap := &corev1.ConfigMap{}
+		err := r.Get(ctx, req.NamespacedName, configMap)
+		if err != nil {
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+
+		// Update current webrenderer versions with the new configMap
+		webrendererVersion := configMap.Data["webrendererVersion"]
+
+		// Check outdated webrenderer versions and update if needed
+		servingWebrenderer := lo.FindOrElse(servingWebrenderersJson, webrenderer.ServingWebrenderer{}, func(sw webrenderer.ServingWebrenderer) bool {
+			return strconv.Itoa(sw.Version) == strings.Split(strings.TrimPrefix(webrendererVersion, "v"), ".")[0]
+		})
+		// Return if empty
+		if (webrenderer.ServingWebrenderer{}) == servingWebrenderer {
+			return ctrl.Result{}, nil
+		}
+		// Check full version
+		if webrendererVersion == servingWebrenderer.VersionFull {
+			// Same version, do nothing
+			return ctrl.Result{}, nil
+		}
+		// Update webrenderer to new version
+		l.Info("Updating webrenderer to new version", "oldVersion", servingWebrenderer.VersionFull, "newVersion", webrendererVersion)
+		webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(servingWebrenderer.Version), r.Namespace)
+		err = webrenderer.UpdateWebrenderer(ctx, configMap)
+		if err != nil {
+			l.Error(err, "Failed to update webrenderer to new version", "version", webrendererVersion)
+			return ctrl.Result{}, err
+		}
+
 		return ctrl.Result{}, nil
 	}
-	fmt.Println("Processing webrenderer-manager-config ConfigMap")
+
+	// // Check if the ConfigMap is "webrenderer-version-config"
+	// if req.Name != "webrenderer-manager-config" {
+	// 	// Not the ConfigMap we are interested in, ignore it
+	// 	return ctrl.Result{}, nil
+	// }
+	// fmt.Println("Processing webrenderer-manager-config ConfigMap")
 
 	configMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, req.NamespacedName, configMap)
@@ -102,18 +142,13 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	})
 
 	servingWebrenderersData := configMap.Data["servingWebrenderers"]
-	servingWebrenderersJson := []ServingWebrenderer{}
 	err = json.Unmarshal([]byte(servingWebrenderersData), &servingWebrenderersJson)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	pendingServingData := configMap.Data["pendingServingWebrenderers"]
-	// If empty, initialize to empty array
-	if pendingServingData == "" {
-		pendingServingData = "[]"
-	}
-	pendingServingJson := []int{}
+	pendingServingJson := []webrenderer.ServingWebrenderer{}
 	err = json.Unmarshal([]byte(pendingServingData), &pendingServingJson)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -132,36 +167,35 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		versionInt, _ := strconv.Atoi(version)
 
 		// Skip if already in servingWebrenderersJson
-		if lo.ContainsBy(servingWebrenderersJson, func(sw ServingWebrenderer) bool {
+		if lo.ContainsBy(servingWebrenderersJson, func(sw webrenderer.ServingWebrenderer) bool {
 			return sw.Version == versionInt
 		}) {
 			continue
 		}
 
-		webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, version, r.Namespace)
+		toCheckWebrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, version, r.Namespace)
 
 		// Check if webrenderer is already being deployed (in pendingServingJson)
-		if !lo.Contains(pendingServingJson, versionInt) {
+		servingWebrenderer := lo.FindOrElse(pendingServingJson, webrenderer.ServingWebrenderer{}, func(sw webrenderer.ServingWebrenderer) bool {
+			return sw.Version == versionInt
+		})
+		if servingWebrenderer == (webrenderer.ServingWebrenderer{}) {
 			// Ensure the webrenderer exist
-			err = webrenderer.GetAndCreateIfNotExists(ctx)
+			servingWebrenderer, err := toCheckWebrenderer.GetAndCreateIfNotExists(ctx)
 			if err != nil {
 				l.Error(err, "Failed to create or ensure webrenderer exists", "version", version)
 				return ctrl.Result{}, err
 			}
 			// Add to pendingServingJson
-			pendingServingJson = append(pendingServingJson, versionInt)
+			pendingServingJson = append(pendingServingJson, servingWebrenderer)
 			l.Info("Added version to pendingServingWebrenderers", "version", version)
 			// Mark updateCheck to true
 			updateCheck = true
 			continue
 		}
 
-		// if webrenderer.UpdateWebrenderer(ctx) != nil {
-		// 	l.Error(err, "Failed to update webrenderer", "version", version)
-		// 	return ctrl.Result{}, err
-		// }
-
-		if ready, err := webrenderer.IsReady(ctx); err != nil {
+		// Check if the webrenderer is ready
+		if ready, err := toCheckWebrenderer.IsReady(ctx); err != nil {
 			l.Error(err, "Failed to check webrenderer status", "version", version)
 			return ctrl.Result{}, err
 		} else if !ready {
@@ -169,56 +203,28 @@ func (r *ConfigMapReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			continue
 		}
 
-		// Add ready webrenderer to servingWebrenderers list
-		webrendererHost := fmt.Sprintf("webrenderer-%s", version)
-		l.Info("Adding new ServingWebrenderer", "version", version, "host", webrendererHost)
-		servingWebrenderersJson = append(servingWebrenderersJson, ServingWebrenderer{
-			Version: versionInt,
-			Host:    webrendererHost,
+		// Move ServingWebrenderer from pending to serving
+		l.Info("Webrenderer is ready, moving from pending to serving", "version", version)
+
+		servingWebrenderersJson = append(servingWebrenderersJson, servingWebrenderer)
+		pendingServingJson = lo.Filter(pendingServingJson, func(v webrenderer.ServingWebrenderer, _ int) bool {
+			return v.Version != versionInt
 		})
-		// Remove from pendingServingJson
-		pendingServingJson = lo.Filter(pendingServingJson, func(v int, _ int) bool {
-			return v != versionInt
-		})
+
 		// Mark updateCheck to true
 		updateCheck = true
 	}
 
-	// Clean up unneeded webrenderers
-	for _, sw := range servingWebrenderersJson {
-		if !lo.Contains(versionIntJson, sw.Version) {
-			l.Info("Removing unneeded webrenderer", "version", sw.Version)
-			webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(sw.Version), r.Namespace)
-			err = webrenderer.DeleteWebrenderer(ctx)
-			if err != nil {
-				l.Error(err, "Failed to delete unneeded webrenderer", "version", sw.Version)
-				return ctrl.Result{}, err
-			}
-			// Remove from servingWebrenderersJson
-			servingWebrenderersJson = lo.Filter(servingWebrenderersJson, func(v ServingWebrenderer, _ int) bool {
-				return v.Version != sw.Version
-			})
-			// Mark updateCheck to true
-			updateCheck = true
-		}
+	// Clean up unneeded serving webrenderers (no longer in required versions)
+	if cleanupUnneededWebrenderers(ctx, r, &versionIntJson, &servingWebrenderersJson, &updateCheck) != nil {
+		l.Error(err, "Failed to clean up unneeded serving webrenderers")
+		return ctrl.Result{}, err
 	}
-	// Clean up unneeded pending webrenderers
-	for _, pv := range pendingServingJson {
-		if !lo.Contains(versionIntJson, pv) {
-			l.Info("Removing unneeded pending webrenderer", "version", pv)
-			webrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(pv), r.Namespace)
-			err = webrenderer.DeleteWebrenderer(ctx)
-			if err != nil {
-				l.Error(err, "Failed to delete unneeded pending webrenderer", "version", pv)
-				return ctrl.Result{}, err
-			}
-			// Remove from pendingServingJson
-			pendingServingJson = lo.Filter(pendingServingJson, func(v int, _ int) bool {
-				return v != pv
-			})
-			// Mark updateCheck to true
-			updateCheck = true
-		}
+
+	// Clean up unneeded pending webrenderers (no longer in required versions)
+	if cleanupUnneededWebrenderers(ctx, r, &versionIntJson, &pendingServingJson, &updateCheck) != nil {
+		l.Error(err, "Failed to clean up unneeded pending webrenderers")
+		return ctrl.Result{}, err
 	}
 
 	// PostReconcile for github webrenderer to commit and push changes if any
@@ -259,6 +265,30 @@ func (r *ConfigMapReconciler) PreReconcile(ctx context.Context) error {
 func (r *ConfigMapReconciler) PostReconcile(ctx context.Context) error {
 	commitMsg := "Update webrenderer ArgoCD app " + time.Now().Format(time.RFC3339)
 	return github.CommitAndPushChanges(ctx, r.GithubClient, commitMsg)
+}
+
+func cleanupUnneededWebrenderers(ctx context.Context, r *ConfigMapReconciler, requiredVersions *[]int, servingVersions *[]webrenderer.ServingWebrenderer, isUpdate *bool) error {
+	l := logf.FromContext(ctx)
+	var err error
+	// Clean up unneeded pending webrenderers (no longer in required versions)
+	for _, sv := range *servingVersions {
+		if !lo.Contains(*requiredVersions, sv.Version) {
+			l.Info("Removing unneeded webrenderer", "version", sv.Version)
+			toCheckWebrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(sv.Version), r.Namespace)
+			err = toCheckWebrenderer.DeleteWebrenderer(ctx)
+			if err != nil {
+				l.Error(err, "Failed to delete unneeded webrenderer", "version", sv.Version)
+				return err
+			}
+			// Remove from pendingServingJson
+			*servingVersions = lo.Filter(*servingVersions, func(v webrenderer.ServingWebrenderer, _ int) bool {
+				return v.Version != sv.Version
+			})
+			// Mark updateCheck to true
+			*isUpdate = true
+		}
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
