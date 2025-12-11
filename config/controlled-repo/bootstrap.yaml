@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: bootstrap-apps
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: 'https://github.com/nut-api/publish-routing-controlled.git'
+    targetRevision: main
+    path: .
+    directory:
+      recurse: true
+      exclude: '{bootstrap.yaml,template/*}'
+      include: '*.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - RespectIgnoreDifferences=true
+  ignoreDifferences:
+  - group: "*"
+    kind: "Application"
+    namespace: "*"
+    jsonPointers:
+    # Allow manually disabling auto sync for apps, useful for debugging.
+    - /spec/syncPolicy/automated

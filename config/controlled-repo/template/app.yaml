@@ -1,0 +1,32 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: webrenderer-VERSION
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: NAMESPACE
+  sources:
+  - repoURL: 'https://helm.vongjon.com'
+    chart: webrenderer
+    targetRevision: CHART_VERSION
+    helm:
+      valueFiles:
+        - $values/webrenderer-VERSION/values.yaml
+      values: |
+        version: VERSION
+        global:
+          isBaseChart: false
+  - repoURL: 'REPO_URL'
+    targetRevision: main
+    ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - applyOutOfSyncOnly=false
