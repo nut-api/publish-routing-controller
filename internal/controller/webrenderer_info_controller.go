@@ -2,7 +2,6 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -17,7 +16,7 @@ import (
 
 func webrendererInfoController(ctx context.Context, r *ConfigMapReconciler, req ctrl.Request) (ctrl.Result, error) {
 	l := logf.FromContext(ctx)
-	fmt.Println("Processing webrenderer-info ConfigMap")
+	l.Info("Reconciling ConfigMap")
 	configMap := &corev1.ConfigMap{}
 	err := r.Get(ctx, req.NamespacedName, configMap)
 	if err != nil {
@@ -42,13 +41,14 @@ func webrendererInfoController(ctx context.Context, r *ConfigMapReconciler, req 
 	}
 	// Update webrenderer to new version
 	l.Info("Updating webrenderer to new version", "oldVersion", servingWebrenderer.VersionFull, "newVersion", webrendererVersion)
-	toCheckWebrenderer := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(servingWebrenderer.Version), r.Namespace)
-	err = toCheckWebrenderer.UpdateWebrenderer(ctx, configMap)
+	webrendererClient := (&github.WebrendererGithub{Client: r.Client, GithubClient: r.GithubClient}).NewWebrenderer(ctx, strconv.Itoa(servingWebrenderer.Version), r.Namespace)
+	err = webrendererClient.UpdateWebrenderer(ctx, configMap)
 	if err != nil {
 		l.Error(err, "Failed to update webrenderer to new version", "version", webrendererVersion)
 		return ctrl.Result{}, err
 	}
 
+	// Replace webrenderer-info ConfigMap with webrednerer-manager-config ConfigMap
 	err = r.Get(ctx, client.ObjectKey{Name: "webrenderer-manager-config", Namespace: r.Namespace}, configMap)
 	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -63,11 +63,6 @@ func webrendererInfoController(ctx context.Context, r *ConfigMapReconciler, req 
 		return sw
 	})
 
-	// PostReconcile for github webrenderer to commit and push changes if any
-	err = r.PostReconcile(ctx)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
 	updateConfigMapByData(ctx, r, configMap, map[string][]webrenderer.ServingWebrenderer{
 		"servingWebrenderers": servingWebrenderersJson,
 	})

@@ -14,6 +14,7 @@ type Webrenderer interface {
 	IsReady(context.Context) (bool, error)
 }
 
+// ServingWebrenderer defines the structure of a webrenderer being served
 type ServingWebrenderer struct {
 	Version     int    `json:"version"`
 	VersionFull string `json:"versionFull"`
