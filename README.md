@@ -1,8 +1,5 @@
 # publish-routing-controller
-// TODO(user): Add simple overview of use/purpose
-
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+A Kubernetes controller build with Kubebuilder to manage application deployments and routing through Istio VirtualServices based on ConfigMap configuration, enabling external applications to dynamically control application sets by updating the ConfigMap.
 
 ## Getting Started
 
